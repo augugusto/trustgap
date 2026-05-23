@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "pr-*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Solidity — forge build + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install Forge dependencies
+        run: forge install
+
+      - name: Forge build
+        run: forge build --sizes
+
+      - name: Forge test
+        run: forge test -vvv
+
+  ceremony:
+    name: Ceremony — build + vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ceremony
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: TypeScript build
+        run: pnpm --filter ceremony build
+
+      - name: Vitest
+        run: pnpm --filter ceremony test
+
+  frontend:
+    name: Frontend — static files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate static files exist
+        run: |
+          test -f frontend/index.html || { echo "Missing index.html"; exit 1; }
+          test -f frontend/css/style.css || { echo "Missing style.css"; exit 1; }
+          test -f frontend/js/config.js || { echo "Missing config.js"; exit 1; }
+          test -f frontend/js/contracts.js || { echo "Missing contracts.js"; exit 1; }
+          test -f frontend/js/verify.js || { echo "Missing verify.js"; exit 1; }
+          test -f frontend/js/app.js || { echo "Missing app.js"; exit 1; }
+          echo "All static files present"
