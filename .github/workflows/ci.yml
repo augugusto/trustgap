@@ -45,27 +45,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          cache: npm
+          cache-dependency-path: ceremony/package-lock.json
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: .
+        run: npm ci
 
       - name: TypeScript build
-        run: pnpm --filter ceremony build
+        run: npm run build
 
       - name: Vitest
-        run: pnpm --filter ceremony test
+        run: npm test
 
   frontend:
     name: Frontend — static files

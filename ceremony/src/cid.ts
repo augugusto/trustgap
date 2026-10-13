@@ -10,7 +10,7 @@
  * Dependencies: @ipld/dag-pb, ipfs-unixfs, multiformats
  */
 
-import { encode as dagPbEncode } from '@ipld/dag-pb';
+import { encode as dagPbEncode, type PBLink } from '@ipld/dag-pb';
 import { UnixFS } from 'ipfs-unixfs';
 import { CID } from 'multiformats/cid';
 import { sha256 } from 'multiformats/hashes/sha2';
@@ -54,9 +54,12 @@ async function createDirNode(
   // Sort by name for deterministic ordering (matches IPFS behavior)
   children.sort((a, b) => a.name.localeCompare(b.name));
 
-  const links = children.map((c) => ({
+  // The cast is types-only. TS 5.7+ parameterises Uint8Array over its buffer
+  // type, and @ipld/dag-pb's PBLink pins ArrayBuffer while the CID produced
+  // here carries ArrayBufferLike. Same bytes at runtime.
+  const links: PBLink[] = children.map((c) => ({
     Name: c.name,
-    Hash: c.node.cid,
+    Hash: c.node.cid as unknown as PBLink['Hash'],
     Tsize: c.node.size,
   }));
 
