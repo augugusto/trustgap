@@ -105,7 +105,7 @@ contract EmergencyGovernor is
 
     function _quorumReached(
         uint256 proposalId
-    ) internal view override(Governor, GovernorVotesQuorumFraction) returns (bool) {
+    ) internal view override(Governor, GovernorCountingSimple) returns (bool) {
         return super._quorumReached(proposalId);
     }
 

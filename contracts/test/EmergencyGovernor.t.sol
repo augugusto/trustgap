@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import "../src/dao/GovernorDAO.sol";
 import "../src/dao/EmergencyGovernor.sol";
 
@@ -106,6 +107,9 @@ contract EmergencyGovernorTest is Test {
 
         vm.prank(charlie);
         share.delegate(charlie);
+
+        // Votes only show up in past checkpoints
+        vm.roll(block.number + 1);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -146,9 +150,10 @@ contract EmergencyGovernorTest is Test {
         // Queue to timelock
         governor.queue(targets, values, calldatas, descriptionHash);
 
-        // Compute the timelock operation ID
+        // Compute the timelock operation ID exactly as GovernorTimelockControl
+        // does: predecessor = 0, salt = bytes20(governor) ^ descriptionHash.
         operationId = timelock.hashOperationBatch(
-            targets, values, calldatas, bytes32(0), descriptionHash
+            targets, values, calldatas, bytes32(0), bytes20(address(governor)) ^ descriptionHash
         );
     }
 
@@ -156,20 +161,25 @@ contract EmergencyGovernorTest is Test {
 
     /// @notice Quorum calculation with 3 members
     function test_EmergencyQuorum_Calculation() public {
-        uint256 totalSupply = share.totalSupply(); // 3
-        assertEq(totalSupply, 3);
+        uint256 totalSupply = share.totalSupply();
+        assertEq(totalSupply, 3e18);
 
         uint256 mainQuorum = (totalSupply * MAIN_QUORUM_PERCENT) / 100;
         uint256 emergencyQuorum = (totalSupply * EMERGENCY_QUORUM_PERCENT) / 100;
 
-        // 51% of 3 = 1, 66% of 3 = 1 (integer math)
-        assertEq(governor.quorum(block.number), mainQuorum);
-        assertEq(emergencyGovernor.quorum(block.number), emergencyQuorum);
+        // 51% of 3e18 = 1.53e18, 66% of 3e18 = 1.98e18
+        assertEq(governor.quorum(block.number - 1), mainQuorum);
+        assertEq(emergencyGovernor.quorum(block.number - 1), emergencyQuorum);
+        assertEq(mainQuorum, 1530000000000000000);
+        assertEq(emergencyQuorum, 1980000000000000000);
     }
 
     /// @notice EmergencyGovernor quorum is higher than main Governor
     function test_EmergencyQuorum_HigherThanMain() public view {
-        assertGt(emergencyGovernor.quorum(block.number), governor.quorum(block.number));
+        assertGt(
+            emergencyGovernor.quorum(block.number - 1),
+            governor.quorum(block.number - 1)
+        );
     }
 
     // ── 2. Cancellation Power ────────────────────────────────────────
@@ -184,7 +194,7 @@ contract EmergencyGovernorTest is Test {
 
         // Verify operation is pending in the timelock
         assertTrue(timelock.isOperationPending(opId));
-        assertEq(uint256(governor.state(mainProposalId)), uint256(Governor.ProposalState.Queued));
+        assertEq(uint256(governor.state(mainProposalId)), uint256(IGovernor.ProposalState.Queued));
 
         // 2. Emergency governor: create cancel proposal
         address[] memory cancelTargets = new address[](1);
@@ -221,7 +231,7 @@ contract EmergencyGovernorTest is Test {
         // Verify proposal succeeded
         assertEq(
             uint256(emergencyGovernor.state(emergencyProposalId)),
-            uint256(Governor.ProposalState.Succeeded)
+            uint256(IGovernor.ProposalState.Succeeded)
         );
 
         // Execute the emergency cancel
@@ -230,9 +240,11 @@ contract EmergencyGovernorTest is Test {
             cancelTargets, cancelValues, cancelCalldatas, cancelDescHash
         );
 
-        // 3. Verify the operation is no longer pending
+        // 3. Verify the operation is no longer pending. Note: OZ v5 cancel()
+        // deletes the timestamp, so the operation ends up Unset (neither
+        // pending nor done) rather than Done.
         assertFalse(timelock.isOperationPending(opId));
-        assertTrue(timelock.isOperationDone(opId));
+        assertFalse(timelock.isOperationReady(opId));
     }
 
     /// @notice Cancellation must go through the full voting process
@@ -244,14 +256,14 @@ contract EmergencyGovernorTest is Test {
         assertTrue(timelock.isOperationPending(opId));
 
         // Attacker (no CANCELLER_ROLE) tries to cancel directly
-        vm.prank(attacker);
         vm.expectRevert(
             abi.encodeWithSelector(
-                AccessControl.AccessControlUnauthorizedAccount.selector,
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
                 attacker,
                 timelock.CANCELLER_ROLE()
             )
         );
+        vm.prank(attacker);
         timelock.cancel(opId);
 
         // Operation should still be pending
@@ -267,8 +279,15 @@ contract EmergencyGovernorTest is Test {
         bytes[] memory calldatas = new bytes[](1);
         calldatas[0] = abi.encodeWithSignature("cancel(bytes32)", bytes32(0));
 
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IGovernor.GovernorInsufficientProposerVotes.selector,
+                attacker,
+                0,
+                1e18
+            )
+        );
         vm.prank(attacker);
-        vm.expectRevert("Governor: proposer votes below proposal threshold");
         emergencyGovernor.propose(targets, values, calldatas, "Attacker cancel");
     }
 
@@ -276,14 +295,26 @@ contract EmergencyGovernorTest is Test {
 
     /// @notice Emergency proposal fails if quorum is not met
     function test_EmergencyFails_IfQuorumNotMet() public {
-        // Only charlie (1 vote) — quorum is 66% of 3 = 1 in integer math
-        // So 1 vote actually meets quorum. The voteSucceeded check applies:
-        // 1 For vs 0 Against → passes.
-        // For 2-member DAO, both must vote. For 3+ members, 1 could pass alone
-        // if no one votes against. This is acceptable for small DAOs.
-        // The real check is whether it's safe to cancel with low participation.
-        // For now, test that charlie alone can create a cancellation proposal
-        // but the cancellation can be contested by the other 2 members.
+        // Only alice votes For (1e18), below the 1.98e18 emergency quorum
+        address[] memory targets = new address[](1);
+        targets[0] = address(target);
+        uint256[] memory values = new uint256[](1);
+        values[0] = 0;
+        bytes[] memory calldatas = new bytes[](1);
+        calldatas[0] = abi.encodeWithSignature("setValue(uint256)", 5);
+
+        string memory desc = "Not enough votes";
+        vm.prank(alice);
+        uint256 proposalId = emergencyGovernor.propose(targets, values, calldatas, desc);
+
+        vm.roll(block.number + emergencyGovernor.votingDelay() + 1);
+
+        vm.prank(alice);
+        emergencyGovernor.castVote(proposalId, 1);
+
+        vm.roll(block.number + emergencyGovernor.votingPeriod());
+
+        assertEq(uint256(emergencyGovernor.state(proposalId)), uint256(IGovernor.ProposalState.Defeated));
     }
 
     /// @notice Emergency proposal succeeds when sufficient members vote
@@ -312,7 +343,7 @@ contract EmergencyGovernorTest is Test {
 
         assertEq(
             uint256(emergencyGovernor.state(proposalId)),
-            uint256(Governor.ProposalState.Succeeded)
+            uint256(IGovernor.ProposalState.Succeeded)
         );
     }
 
@@ -356,7 +387,6 @@ contract EmergencyGovernorTest is Test {
         bytes[] memory calldatas = new bytes[](1);
         calldatas[0] = abi.encodeWithSignature("setValue(uint256)", 1);
 
-        // Don't vote — proposal stays Pending → becomes Defeated
         string memory desc = "Never voted";
         vm.prank(alice);
         emergencyGovernor.propose(targets, values, calldatas, desc);
@@ -364,8 +394,8 @@ contract EmergencyGovernorTest is Test {
         vm.roll(block.number + emergencyGovernor.votingDelay() + 1);
         vm.roll(block.number + emergencyGovernor.votingPeriod());
 
-        // Proposal is Defeated (no votes), cannot execute
-        vm.expectRevert("Governor: proposal not successful");
+        // Defeated (no votes cast) -> execution reverts
+        vm.expectRevert();
         emergencyGovernor.execute(targets, values, calldatas, keccak256(bytes(desc)));
     }
 }

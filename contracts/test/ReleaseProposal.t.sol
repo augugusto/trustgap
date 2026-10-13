@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import "../src/releases/ReleaseProposal.sol";
 import "../src/lib/Interfaces.sol";
 
@@ -64,7 +65,8 @@ contract ReleaseProposalTest is Test {
     }
 
     function test_RecordRelease_StoresProposer() public {
-        vm.prank(recorder_role);
+        // The contract records tx.origin, so set both msg.sender and tx.origin
+        vm.prank(recorder_role, recorder_role);
         recorder.recordRelease(CID_1);
 
         (, address proposer, , ) = recorder.getRelease(0);
@@ -72,22 +74,22 @@ contract ReleaseProposalTest is Test {
     }
 
     function test_RecordRelease_ZeroCID_Reverts() public {
-        vm.prank(recorder_role);
         vm.expectRevert(ReleaseProposal.ZeroCID.selector);
+        vm.prank(recorder_role);
         recorder.recordRelease(bytes32(0));
     }
 
     // ── Role Enforcement ────────────────────────────────────────────
 
     function test_NonRecorderCannotRecord() public {
-        vm.prank(attacker);
         vm.expectRevert(
             abi.encodeWithSelector(
-                AccessControl.AccessControlUnauthorizedAccount.selector,
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
                 attacker,
                 recorder.RECORDER_ROLE()
             )
         );
+        vm.prank(attacker);
         recorder.recordRelease(CID_1);
     }
 
@@ -95,14 +97,14 @@ contract ReleaseProposalTest is Test {
         vm.prank(recorder_role);
         recorder.recordRelease(CID_1);
 
-        vm.prank(attacker);
         vm.expectRevert(
             abi.encodeWithSelector(
-                AccessControl.AccessControlUnauthorizedAccount.selector,
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
                 attacker,
                 recorder.RECORDER_ROLE()
             )
         );
+        vm.prank(attacker);
         recorder.markExecuted(0);
     }
 
@@ -120,8 +122,8 @@ contract ReleaseProposalTest is Test {
     }
 
     function test_MarkExecuted_InvalidIndex_Reverts() public {
-        vm.prank(recorder_role);
         vm.expectRevert("ReleaseProposal: invalid index");
+        vm.prank(recorder_role);
         recorder.markExecuted(0);
     }
 

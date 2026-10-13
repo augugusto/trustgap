@@ -8,6 +8,8 @@ import "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
 import "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
 import "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 
 // ----------------------------------------------------------------------------
@@ -23,7 +25,7 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 ///         Shares are non-transferable and carry 1 vote each via ERC20Votes.
 ///         Both mint() and burn() are restricted to governor or timelock,
 ///         enabling membership proposals to flow through the full governance cycle.
-contract DAOShare is ERC20Votes {
+contract DAOShare is ERC20, ERC20Permit, ERC20Votes {
     /// @notice Address of the GovernorDAO contract authorized to manage members
     address public governor;
 
@@ -81,7 +83,7 @@ contract DAOShare is ERC20Votes {
     /// @param to The address receiving membership
     function mint(address to) external onlyGovernance {
         if (balanceOf(to) > 0) revert AlreadyMember();
-        _mint(to, 1);
+        _mint(to, 1e18);
     }
 
     /// @notice Burn 1 share from a member, revoking their membership.
@@ -89,7 +91,7 @@ contract DAOShare is ERC20Votes {
     /// @param from The address whose membership is revoked
     function burn(address from) external onlyGovernance {
         if (balanceOf(from) == 0) revert NotMember();
-        _burn(from, 1);
+        _burn(from, 1e18);
     }
 
     /// @notice Hook override to make shares non-transferable.
@@ -197,7 +199,7 @@ contract GovernorDAO is
 
     function _quorumReached(
         uint256 proposalId
-    ) internal view override(Governor, GovernorVotesQuorumFraction) returns (bool) {
+    ) internal view override(Governor, GovernorCountingSimple) returns (bool) {
         return super._quorumReached(proposalId);
     }
 
@@ -239,7 +241,7 @@ contract GovernorDAO is
         uint256[] memory values,
         bytes[] memory calldatas,
         bytes32 descriptionHash
-    ) internal override(Governor, GovernorTimelockControl) returns (uint256) {
+    ) internal override(Governor, GovernorTimelockControl) returns (uint48) {
         return
             super._queueOperations(proposalId, targets, values, calldatas, descriptionHash);
     }

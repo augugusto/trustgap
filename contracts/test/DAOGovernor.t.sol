@@ -39,6 +39,11 @@ contract DAOGovernorTest is Test {
     }
 
     function _deployContracts(uint256 timelockDelay) internal {
+        // Foundry starts at block.timestamp == 1, which collides with the
+        // TimelockController's _DONE_TIMESTAMP sentinel: a zero-delay schedule
+        // would look already executed. Move off t=1 first.
+        vm.warp(block.timestamp + 1);
+
         vm.startPrank(address(this));
 
         // 1. DAOShare (deployer = governor for bootstrap)
@@ -71,12 +76,16 @@ contract DAOGovernorTest is Test {
     }
 
     function _setupMembers() internal {
-        // Each member delegates to themselves (1 vote each)
+        // Each member delegates to themselves: 1 share = 1e18 voting units
         vm.prank(alice);
         share.delegate(alice);
 
         vm.prank(bob);
         share.delegate(bob);
+
+        // Votes only show up in past checkpoints, so advance one block before
+        // the Governor reads getVotes(proposer, clock() - 1).
+        vm.roll(block.number + 1);
     }
 
     function _setupTarget() internal {
@@ -162,19 +171,19 @@ contract DAOGovernorTest is Test {
     // ── 1. Membership Tests ─────────────────────────────────────────
 
     function test_Membership_OneShareEach() public {
-        assertEq(share.balanceOf(alice), 1);
-        assertEq(share.balanceOf(bob), 1);
-        assertEq(share.totalSupply(), 2);
+        assertEq(share.balanceOf(alice), 1e18);
+        assertEq(share.balanceOf(bob), 1e18);
+        assertEq(share.totalSupply(), 2e18);
     }
 
     function test_Membership_DelegateGrantsVotingPower() public {
-        assertEq(share.getVotes(alice), 1);
-        assertEq(share.getVotes(bob), 1);
+        assertEq(share.getVotes(alice), 1e18);
+        assertEq(share.getVotes(bob), 1e18);
     }
 
     function test_Membership_NonTransferable() public {
-        vm.prank(alice);
         vm.expectRevert("DAOShare: non-transferable");
+        vm.prank(alice);
         share.transfer(bob, 1);
     }
 
@@ -182,8 +191,8 @@ contract DAOGovernorTest is Test {
         // No public join() exists — the function was removed.
         // Charlie cannot mint shares to themselves.
         // The mint() function requires onlyGovernance (governor or timelock).
-        vm.prank(charlie);
         vm.expectRevert("DAOShare: not authorized");
+        vm.prank(charlie);
         share.mint(charlie);
     }
 
@@ -202,11 +211,11 @@ contract DAOGovernorTest is Test {
         uint256 proposalId = _createProposal(address(target), data, "Set value to 42");
 
         assertGt(proposalId, 0);
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Pending));
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Pending));
     }
 
     function test_NonMemberCannotPropose() public {
-        // Charlie is not a member (has 0 shares)
+        // Charlie is not a member (0 shares)
         bytes memory data = abi.encodeWithSignature("setValue(uint256)", 42);
         address[] memory targets = new address[](1);
         targets[0] = address(target);
@@ -215,8 +224,15 @@ contract DAOGovernorTest is Test {
         bytes[] memory calldatas = new bytes[](1);
         calldatas[0] = data;
 
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IGovernor.GovernorInsufficientProposerVotes.selector,
+                charlie,
+                0,
+                1e18
+            )
+        );
         vm.prank(charlie);
-        vm.expectRevert("Governor: proposer votes below proposal threshold");
         governor.propose(targets, values, calldatas, "Charlie's proposal");
     }
 
@@ -233,38 +249,30 @@ contract DAOGovernorTest is Test {
             1 // Bob For
         );
 
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Succeeded));
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Succeeded));
 
         // Queue
         _queueProposal(address(target), data, "Set value to 42");
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Queued));
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Queued));
 
         // Execute (timelock delay = 0)
         _executeProposal(address(target), data, "Set value to 42");
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Executed));
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Executed));
 
         // Verify the target was called
         assertEq(target.getValue(), 42);
     }
 
     function test_QuorumNotMet_WithOneVote_Defeated() public {
-        // Alice votes For (1 vote), bob abstains.
-        // Total supply = 2, quorum = 2 * 51/100 = 1
-        // ... wait, 1 vote meets quorum of 1. Let's check:
-        // quorum = 2 * 51 / 100 = 1 (integer math)
-        // With 1 vote For and 0 Against → quorumReached=true, voteSucceeded=true
-        //
-        // To test quorum failure we need more members. Let's add david.
-        vm.prank(address(this));
-        share.mint(david);
-        vm.prank(david);
-        share.delegate(david);
-        // Now supply = 3, quorum = 3 * 51 / 100 = 1 (still 1)
-        // Hmm, integer math makes quorum = 1 for 1-2 members.
-        // With 3 members: 3*51/100 = 1 → still 1 vote meets quorum.
-        // Quorum of 1 is always met if anyone votes.
-        // This is an acceptable edge case for small DAOs.
-        // The real protection is the timelock + EmergencyGovernor.
+        // 2 members (2e18 supply) -> quorum = 51% = 1.02e18.
+        // Only alice votes For with 1e18, so quorum is not reached.
+        bytes memory data = abi.encodeWithSignature("setValue(uint256)", 42);
+        uint256 proposalId = _createAndVoteProposal(
+            address(target), data, "Only alice votes", 1, 3
+        );
+
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Defeated));
+        assertEq(target.getValue(), 0);
     }
 
     function test_NonMemberCannotVote() public {
@@ -273,9 +281,14 @@ contract DAOGovernorTest is Test {
 
         vm.roll(block.number + governor.votingDelay() + 1);
 
+        // OZ v5 does not revert on zero weight: the vote is recorded with
+        // weight 0, so it must not move any of the tallies.
         vm.prank(charlie);
-        vm.expectRevert("Governor: weight must be positive");
         governor.castVote(proposalId, 1);
+
+        (, uint256 forVotes, ) = governor.proposalVotes(proposalId);
+        assertEq(forVotes, 0);
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Active));
     }
 
     // ── 4. Member Addition (through governance) ─────────────────────
@@ -293,13 +306,13 @@ contract DAOGovernorTest is Test {
             1 // Bob For
         );
 
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Succeeded));
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Succeeded));
 
         _queueProposal(address(share), data, description);
         _executeProposal(address(share), data, description);
 
-        assertEq(share.balanceOf(charlie), 1);
-        assertEq(share.totalSupply(), 3);
+        assertEq(share.balanceOf(charlie), 1e18);
+        assertEq(share.totalSupply(), 3e18);
     }
 
     function test_AddMember_MustBeApproved() public {
@@ -317,7 +330,7 @@ contract DAOGovernorTest is Test {
         // 1 For vs 1 Against, total votes = 2
         // quorum = 2*51/100 = 1 → quorum met (2 votes cast).
         // voteSucceeded: For > Against? 1 > 1 = false → Defeated
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Defeated));
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Defeated));
         assertEq(share.balanceOf(charlie), 0);
     }
 
@@ -344,26 +357,50 @@ contract DAOGovernorTest is Test {
     // ── 5. Member Removal ───────────────────────────────────────────
 
     function test_RemoveMember_ViaGovernance() public {
-        // Propose removing bob
+        // Add charlie first so a majority (alice + charlie) can outvote bob.
+        bytes memory addData = abi.encodeWithSignature("mint(address)", charlie);
+        string memory addDesc = "Add charlie";
+        _createAndVoteProposal(address(share), addData, addDesc, 1, 1);
+        _queueProposal(address(share), addData, addDesc);
+        _executeProposal(address(share), addData, addDesc);
+        assertEq(share.balanceOf(charlie), 1e18);
+
+        vm.prank(charlie);
+        share.delegate(charlie);
+        vm.roll(block.number + 1);
+
         bytes memory data = abi.encodeWithSignature("burn(address)", bob);
         string memory description = "Remove bob";
 
-        uint256 proposalId = _createAndVoteProposal(
-            address(share),
-            data,
-            description,
-            1, // Alice For
-            0 // Bob Against (doesn't matter, alice's vote succeeds)
-        );
+        address[] memory targets = new address[](1);
+        targets[0] = address(share);
+        uint256[] memory values = new uint256[](1);
+        values[0] = 0;
+        bytes[] memory calldatas = new bytes[](1);
+        calldatas[0] = data;
 
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Succeeded));
+        vm.prank(alice);
+        uint256 proposalId = governor.propose(targets, values, calldatas, description);
+
+        vm.roll(block.number + governor.votingDelay() + 1);
+
+        vm.prank(alice);
+        governor.castVote(proposalId, 1);
+        vm.prank(charlie);
+        governor.castVote(proposalId, 1);
+        vm.prank(bob);
+        governor.castVote(proposalId, 0);
+
+        vm.roll(block.number + governor.votingPeriod());
+
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Succeeded));
 
         _queueProposal(address(share), data, description);
         _executeProposal(address(share), data, description);
 
         assertEq(share.balanceOf(bob), 0);
         assertEq(share.getVotes(bob), 0);
-        assertEq(share.totalSupply(), 1);
+        assertEq(share.totalSupply(), 2e18);
     }
 
     // ── 6. Timelock Delay Enforcement ───────────────────────────────
@@ -385,10 +422,10 @@ contract DAOGovernorTest is Test {
 
         // Queue succeeds
         _queueProposal(address(target), data, "Delayed execution");
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Queued));
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Queued));
 
-        // Attempt execute before delay → should revert
-        vm.expectRevert("TimelockController: operation is not ready");
+        // Attempt execute before delay -> reverts (operation not ready yet)
+        vm.expectRevert();
         _executeProposal(address(target), data, "Delayed execution");
 
         // Fast forward past delay
@@ -396,35 +433,37 @@ contract DAOGovernorTest is Test {
 
         // Execute succeeds
         _executeProposal(address(target), data, "Delayed execution");
-        assertEq(uint256(governor.state(proposalId)), uint256(Governor.ProposalState.Executed));
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Executed));
         assertEq(target.getValue(), 99);
     }
 
     // ── 7. Quorum Calculation ───────────────────────────────────────
 
     function test_QuorumCalculation() public {
-        // 51% of 2 members = 1 (integer math)
-        uint256 expectedQuorum = (2 * QUORUM_PERCENT) / 100;
-        assertEq(governor.quorum(block.number), expectedQuorum);
-        assertEq(expectedQuorum, 1);
+        // 51% of 2 members (2e18 supply) = 1.02e18
+        uint256 expectedQuorum = (2e18 * QUORUM_PERCENT) / 100;
+        assertEq(governor.quorum(block.number - 1), expectedQuorum);
     }
 
     function test_QuorumIncreasesWithMembers() public {
-        // Add david as member first
-        vm.startPrank(address(this));
-        share.mint(david);
-        share.setGovernor(address(governor)); // re-set after mint
-        
-        vm.prank(david);
-        share.delegate(david);
-        vm.stopPrank();
+        uint256 quorumWith2 = governor.quorum(block.number - 1);
 
-        // 51% of 3 = 1 (still 1 with integer math)
-        uint256 quorum3 = (3 * QUORUM_PERCENT) / 100;
-        assertEq(governor.quorum(block.number), quorum3);
+        // Add david through the full governance flow
+        bytes memory data = abi.encodeWithSignature("mint(address)", david);
+        string memory desc = "Add david";
+        _createAndVoteProposal(address(share), data, desc, 1, 1);
+        _queueProposal(address(share), data, desc);
+        _executeProposal(address(share), data, desc);
 
-        // For 2 members: 51% of 2 = 1 → majority requires both
-        // At 10 members: 51% of 10 = 5 → need 6 votes (ceil)
-        // At 100 members: 51 → need 51 votes
+        assertEq(share.balanceOf(david), 1e18);
+        assertEq(share.totalSupply(), 3e18);
+
+        // Advance a few blocks so the new supply is settled as a past checkpoint
+        vm.roll(block.number + 10);
+        uint256 quorumWith3 = governor.quorum(block.number - 5);
+
+        assertEq(quorumWith2, (2e18 * QUORUM_PERCENT) / 100);
+        assertEq(quorumWith3, (3e18 * QUORUM_PERCENT) / 100);
+        assertGt(quorumWith3, quorumWith2);
     }
 }

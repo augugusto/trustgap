@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import "../src/ens/ENSResolver.sol";
 import "../src/lib/Interfaces.sol";
 
@@ -29,6 +30,8 @@ contract ENSResolverTest is Test {
     address public attacker = address(0x2);
 
     event ContenthashSet(bytes32 indexed contenthash);
+    event ENSNodeSet(bytes32 indexed node);
+    event PublicResolverSet(address indexed resolver);
 
     function setUp() public {
         mockPublicResolver = new MockENSPublicResolver();
@@ -71,20 +74,20 @@ contract ENSResolverTest is Test {
     }
 
     function test_NonCallerCannotSetContenthash() public {
-        vm.prank(attacker);
         vm.expectRevert(
             abi.encodeWithSelector(
-                AccessControl.AccessControlUnauthorizedAccount.selector,
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
                 attacker,
                 resolver.CALLER_ROLE()
             )
         );
+        vm.prank(attacker);
         resolver.setContenthash(TEST_CID);
     }
 
     function test_ZeroContenthash_Reverts() public {
-        vm.prank(caller);
         vm.expectRevert(ENSResolver.ZeroContenthash.selector);
+        vm.prank(caller);
         resolver.setContenthash(bytes32(0));
     }
 
@@ -99,14 +102,14 @@ contract ENSResolverTest is Test {
     }
 
     function test_NonAdminCannotSetENSNode() public {
-        vm.prank(attacker);
         vm.expectRevert(
             abi.encodeWithSelector(
-                AccessControl.AccessControlUnauthorizedAccount.selector,
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
                 attacker,
                 resolver.DEFAULT_ADMIN_ROLE()
             )
         );
+        vm.prank(attacker);
         resolver.setENSNode(bytes32(uint256(1)));
     }
 
@@ -126,14 +129,14 @@ contract ENSResolverTest is Test {
     }
 
     function test_NonAdminCannotSetPublicResolver() public {
-        vm.prank(attacker);
         vm.expectRevert(
             abi.encodeWithSelector(
-                AccessControl.AccessControlUnauthorizedAccount.selector,
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
                 attacker,
                 resolver.DEFAULT_ADMIN_ROLE()
             )
         );
+        vm.prank(attacker);
         resolver.setPublicResolver(address(0x999));
     }
 
