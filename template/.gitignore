@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+cache/
+artifacts/
+broadcast/
+.env
+*.swp
+*.swo
+.DS_Store

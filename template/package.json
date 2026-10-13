@@ -1,0 +1,18 @@
+{
+  "name": "{{PAQUETE}}",
+  "private": true,
+  "version": "0.1.0",
+  "description": "{{NOMBRE}} — build verificable end to end: contratos + ceremonia + frontend estático",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "npm run build:contracts && npm run build:ceremony",
+    "build:contracts": "cd contracts && forge build",
+    "build:ceremony": "npm --prefix ceremony run build",
+    "test": "npm run test:contracts && npm run test:ceremony",
+    "test:contracts": "cd contracts && forge test",
+    "test:ceremony": "npm --prefix ceremony test",
+    "doctor": "bash scripts/nuevo-proyecto.sh doctor ."
+  }
+}

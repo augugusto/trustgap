@@ -1,0 +1,10 @@
+# Archivos que `update` sincroniza desde el template.
+# Uno por línea, rutas relativas al template.
+# Prefijo _github/ se copia como .github/ en el proyecto.
+#
+# A propósito NO está acá: nada de src/, tests, package.json, foundry.toml ni
+# dependencias. Eso es del proyecto y update no lo pisa.
+_github/workflows/ci.yml
+scripts/nuevo-proyecto.sh
+docs/HOSTING.md
+docs/EDITAR.md
