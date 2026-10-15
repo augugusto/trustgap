@@ -479,7 +479,7 @@ Hosting elegido: **{{HOSTING}}**.
 
 Repo: `{{REPO_URL}}`
 
-Para cambiarlo: `scripts/nuevo-proyecto.sh update . --hosting radicle|github|nostr`
+Para cambiarlo: `scripts/nuevo-proyecto.sh update . --hosting radicle|github`
 <!-- HOSTING:END -->
 
 ## License

@@ -60,9 +60,27 @@ scripts/nuevo-proyecto.sh doctor .              # estado de dependencias
 
 ## 7. La ceremonia
 
+Los atajos están en scripts/ceremonia.sh:
+
 ```bash
-cd ceremony
-npm run build
-node dist/index.js cid --dir ../frontend
-node dist/index.js verify --dir ../frontend --expected-cid bafy...
+scripts/ceremonia.sh build              # compila el CLI
+scripts/ceremonia.sh cid                # CID del frontend
+scripts/ceremonia.sh verificar bafy...  # ¿el frontend produce ese CID?
+scripts/ceremonia.sh ipfs               # sube y pinnea en IPFS
+scripts/ceremonia.sh propuesta bafy...  # calldata de la propuesta para la DAO
+scripts/ceremonia.sh estado             # qué dice la cadena
 ```
+
+Y para publicar un release completo (hasta armar la propuesta):
+
+```bash
+cp .env.example .env      # completá con los datos del deploy
+scripts/publicar.sh --hasta cid     # sólo calcular el CID
+scripts/publicar.sh                 # flujo completo
+```
+
+publicar.sh calcula el CID, lo compara con el release publicado, sube a IPFS,
+arma la propuesta y deja un manifiesto en releases/. Todavía no manda la
+transacción de la propuesta: al final imprime los comandos exactos para ese
+paso y para votar.
+

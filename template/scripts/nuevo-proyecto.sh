@@ -79,6 +79,32 @@ check_deps() {
 # tplvar <archivo-vars> <CLAVE> — lee un valor, tolerando comillas
 tplvar() { sed -n "s/^$2=//p" "$1" | sed 's/^"//; s/"$//' | head -1; }
 
+# rad está en ~/.radicle/bin cuando lo instalás con el script oficial
+find_rad() {
+  if command -v rad >/dev/null 2>&1; then command -v rad
+  elif [ -x "${HOME}/.radicle/bin/rad" ]; then printf '%s\n' "${HOME}/.radicle/bin/rad"
+  fi
+}
+
+rad_home_dir() { printf '%s\n' "${RAD_HOME:-${HOME}/.radicle}"; }
+
+check_optional() {
+  printf '\nopcionales\n'
+  local rad; rad="$(find_rad || true)"
+  if [ -z "$rad" ]; then
+    printf '  %-10s %s\n' "rad" "no instalado (sólo para hosting radicle)"
+    note "se instala con:  curl -sSf https://radicle.xyz/install | sh"
+    return 0
+  fi
+  printf '  %-10s %s\n' "rad" "$("$rad" --version 2>/dev/null | head -1)"
+  local rh; rh="$(rad_home_dir)"
+  if [ -f "$rh/keys/radicle.pub" ]; then
+    printf '  %-10s %s\n' "identidad" "ok ($rh/keys/radicle.pub)"
+  else
+    printf '  %-10s %s\n' "identidad" "falta: 'rad auth' (una sola vez por máquina)"
+  fi
+}
+
 # ── doctor ─────────────────────────────────────────────────────────────
 cmd_doctor() {
   local target="${1:-}"
@@ -88,6 +114,7 @@ cmd_doctor() {
   else
     ok "todas las dependencias presentes"
   fi
+  check_optional
 
   if [ -n "$target" ]; then
     printf '\nestado del proyecto %s\n' "$target"
@@ -157,11 +184,10 @@ render_hosting_block() {
   block="$(python3 - "$hosting" "$repo" <<'PY'
 import sys
 hosting, repo = sys.argv[1], sys.argv[2]
-nombre = {'radicle':'Radicle','github':'GitHub','nostr':'nostr git'}[hosting]
+nombre = {'radicle':'Radicle','github':'GitHub'}[hosting]
 extra = {
  'radicle':'git descentralizado: sin dueño único y con historia que no se reescribe.',
  'github' :'cómodo, pero un solo dueño puede reescribir la historia (force-push, borrar tags).',
- 'nostr'  :'git sobre relays nostr: sin dueño único, con identidad por clave.',
 }[hosting]
 print('## Dónde vive el código')
 print()
@@ -171,7 +197,7 @@ print('Repo: `%s`' % repo)
 print()
 print(extra)
 print()
-print('Para cambiarlo: `scripts/nuevo-proyecto.sh update . --hosting radicle|github|nostr`')
+print('Para cambiarlo: `scripts/nuevo-proyecto.sh update . --hosting radicle|github`')
 PY
 )"
   python3 - "$f" "$block" <<'PY'
@@ -210,10 +236,50 @@ commit_if_possible() {
   return 1
 }
 
+# ── paso Radicle ───────────────────────────────────────────────────────
+# Publica el repo nuevo en la red Radicle. Necesita el CLI (rad) y una
+# identidad de Radicle, que se crea una sola vez por máquina con 'rad auth'.
+# Si falta cualquiera de las dos, avisa y sigue: el proyecto queda igual.
+radicle_init() {
+  local dir="$1" nombre="$2"
+  local rad; rad="$(find_rad || true)"
+  local rh; rh="$(rad_home_dir)"
+
+  if [ -z "$rad" ]; then
+    warn "no encuentro el CLI de Radicle: salteo la publicación"
+    note "se instala con:  curl -sSf https://radicle.xyz/install | sh"
+    note "y después, dentro del proyecto:  rad init"
+    return 0
+  fi
+  if [ ! -f "$rh/keys/radicle.pub" ]; then
+    warn "todavía no hay identidad de Radicle en $rh: salteo la publicación"
+    note "se crea una sola vez con 'rad auth' (pide un alias y una passphrase)"
+    note "y después, dentro del proyecto:  rad init"
+    return 0
+  fi
+
+  printf 'publicando en Radicle\n'
+  local flags=()
+  local help
+  help="$("$rad" init --help 2>&1 || true)"
+  if printf '%s' "$help" | grep -q -- '--name'; then
+    flags=(--name "$nombre")
+    printf '%s' "$help" | grep -q -- '--default-branch' && flags+=(--default-branch main)
+    printf '%s' "$help" | grep -q -- '--no-confirm'     && flags+=(--no-confirm)
+  fi
+
+  if ( cd "$dir" && "$rad" init "${flags[@]}" ); then
+    ok "repo de Radicle inicializado"
+  else
+    warn "rad init no terminó bien; probá a mano dentro del proyecto"
+    note "si dice que no hay nodo:  rad node start"
+  fi
+}
+
 # ── init ───────────────────────────────────────────────────────────────
 cmd_init() {
   local dest="" nombre="" paquete="" simbolo="" dominio="" repo_url="" hosting="radicle"
-  local do_install=1 force=0
+  local do_install=1 do_radicle=1 force=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -224,6 +290,7 @@ cmd_init() {
       --repo-url) repo_url="$2"; shift 2 ;;
       --hosting)  hosting="$2"; shift 2 ;;
       --no-install) do_install=0; shift ;;
+      --no-radicle) do_radicle=0; shift ;;
       --force)    force=1; shift ;;
       -*) die "opción desconocida: $1" ;;
       *)  [ -z "$dest" ] || die "sobra un argumento: $1"; dest="$1"; shift ;;
@@ -231,7 +298,7 @@ cmd_init() {
   done
 
   [ -n "$dest" ] || die "falta el directorio destino. Uso: nuevo-proyecto.sh init <dir> [opciones]"
-  case "$hosting" in radicle|github|nostr) ;; *) die "--hosting debe ser radicle, github o nostr";; esac
+  case "$hosting" in radicle|github) ;; *) die "--hosting debe ser radicle o github";; esac
 
   local base
   base="$(basename "$dest")"
@@ -246,7 +313,6 @@ cmd_init() {
     case "$hosting" in
       github)  repo_url="https://github.com/CAMBIAR-USUARIO/${paquete}" ;;
       radicle) repo_url="radicle://${paquete}" ;;
-      nostr)   repo_url="nostr://CAMBIAR/nostr-git/${paquete}" ;;
     esac
   fi
 
@@ -312,6 +378,13 @@ cmd_init() {
     note "--no-install: me salteo forge install y npm ci"
   fi
 
+  if [ "$hosting" = "radicle" ] && [ "$do_radicle" -eq 1 ]; then
+    printf '\n'
+    radicle_init "$dest" "$nombre"
+  elif [ "$hosting" != "radicle" ]; then
+    note "hosting $hosting: no inicializo nada en Radicle"
+  fi
+
   printf '\nlisto. próximos pasos:\n'
   note "cd $dest"
   note "editá frontend/js/config.js (EXPECTED_CID, CONTRACTS, ENS_DOMAIN) después del deploy"
@@ -343,7 +416,7 @@ cmd_update() {
   [ -d "$TEMPLATE_DIR" ] || die "no encuentro el template en $TEMPLATE_DIR (pasá --template /ruta/al/repo)"
   [ -f "$TEMPLATE_DIR/MANIFEST" ] || die "el template no tiene MANIFEST"
 
-  case "${hosting:-}" in ""|radicle|github|nostr) ;; *) die "--hosting debe ser radicle, github o nostr";; esac
+  case "${hosting:-}" in ""|radicle|github) ;; *) die "--hosting debe ser radicle o github";; esac
 
   local paquete; paquete="$(tplvar "$vars" PAQUETE)"
   if [ -n "$hosting" ] && [ "$dry" -eq 0 ]; then
@@ -351,7 +424,6 @@ cmd_update() {
     case "$hosting" in
       github)  sed -i "s|^REPO_URL=.*|REPO_URL=https://github.com/CAMBIAR-USUARIO/${paquete}|" "$vars" ;;
       radicle) sed -i "s|^REPO_URL=.*|REPO_URL=radicle://${paquete}|" "$vars" ;;
-      nostr)   sed -i "s|^REPO_URL=.*|REPO_URL=nostr://CAMBIAR/nostr-git/${paquete}|" "$vars" ;;
     esac
     ok "hosting -> $hosting"
   fi

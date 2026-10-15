@@ -13,6 +13,8 @@
     "test": "npm run test:contracts && npm run test:ceremony",
     "test:contracts": "cd contracts && forge test",
     "test:ceremony": "npm --prefix ceremony test",
-    "doctor": "bash scripts/nuevo-proyecto.sh doctor ."
+    "doctor": "bash scripts/nuevo-proyecto.sh doctor .",
+    "ceremonia": "bash scripts/ceremonia.sh",
+    "publicar": "bash scripts/publicar.sh"
   }
 }

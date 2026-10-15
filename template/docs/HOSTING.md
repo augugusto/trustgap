@@ -11,11 +11,20 @@ Repo: `{{REPO_URL}}`
 Para cambiarlo en cualquier momento:
 
 ```bash
-scripts/nuevo-proyecto.sh update . --hosting radicle   # o github, o nostr
+scripts/nuevo-proyecto.sh update . --hosting radicle   # o github
 ```
 
 Eso re-renderiza este archivo y el bloque de hosting del README. No toca
 código ni dependencias.
+
+## Publicar el repo en Radicle
+
+Si el hosting es Radicle, `scripts/nuevo-proyecto.sh init` corre `rad init`
+para anunciar el proyecto a la red. Eso necesita el CLI de Radicle
+(`curl -sSf https://radicle.xyz/install | sh`) y una identidad, que se crea
+una sola vez por máquina con `rad auth`. Si falta alguno, el script avisa y el
+proyecto queda igual de completo: se publica después con `rad init` desde
+adentro del proyecto.
 
 ## Las tres opciones
 
@@ -23,12 +32,11 @@ código ni dependencias.
 |---|---|---|
 | **Radicle** | git descentralizado, sin dueño único, la historia no se reescribe, soporta contribuciones anónimas | menos gente lo conoce, hay que correr un nodo o usar un seed |
 | **GitHub** | cómodo, gratis, todo el mundo lo tiene | un solo dueño puede reescribir la historia (force-push, borrar tags) e inyectar commits |
-| **nostr git** | sin dueño único, identidad por clave, sobre relays | ecosistema joven, tooling todavía verde |
 
 ## Sobre el CI
 
 El template incluye `.github/workflows/ci.yml`, que es específico de GitHub
-Actions. Si el repo vive en Radicle o en nostr git, ese archivo queda inerte y
+Actions. Si el repo vive en Radicle, ese archivo queda inerte y
 no molesta; los mismos tres chequeos se pueden correr a mano:
 
 ```bash

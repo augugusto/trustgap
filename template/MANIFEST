@@ -6,5 +6,7 @@
 # dependencias. Eso es del proyecto y update no lo pisa.
 _github/workflows/ci.yml
 scripts/nuevo-proyecto.sh
+scripts/ceremonia.sh
+scripts/publicar.sh
 docs/HOSTING.md
 docs/EDITAR.md
