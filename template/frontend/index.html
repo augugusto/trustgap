@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{NOMBRE}} — Don't trust. Verify.</title>
+
+  <!-- Vendored dependencies -->
+  <script src="js/vendor/ethers-5.7.umd.min.js"></script>
+
+  <!-- Application scripts (order matters) -->
+  <script src="js/config.js"></script>
+  <script src="js/contracts.js"></script>
+  <script src="js/verify.js"></script>
+  <script src="js/app.js"></script>
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main>
+    <h1>{{NOMBRE}}</h1>
+    <p class="tagline">Don&#39;t trust. Verify.</p>
+
+    <div id="error-box" class="hidden"></div>
+
+    <button id="connect-btn">Connect Wallet to Verify</button>
+
+    <div id="wallet-info" class="hidden">
+      <span id="wallet-address"></span>
+    </div>
+
+    <div id="badge" class="hidden"></div>
+
+    <div id="verification-details"></div>
+  </main>
+
+  <footer>
+    <p>
+      Powered by <a href="https://github.com/{{PAQUETE}}" target="_blank" rel="noopener">{{NOMBRE}}</a> —
+      IPFS + ENS + DAO + Smart Contracts.
+      Source on <a href="#" id="radicle-link" target="_blank" rel="noopener">Radicle</a>.
+    </p>
+  </footer>
+
+  <script>
+    // Set Radicle link if configured
+    if (typeof RADICLE_REPO_URL !== 'undefined' && RADICLE_REPO_URL) {
+      document.getElementById('radicle-link').href = RADICLE_REPO_URL;
+    }
+  </script>
+</body>
+</html>
